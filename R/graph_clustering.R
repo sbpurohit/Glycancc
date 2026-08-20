@@ -64,8 +64,8 @@ knn_network_from_umap<-function(myumap,metric="cosine"){
 #' @param graph2 Second igraph object
 #' @return igraph object
 #' @export
-join_graphs<-function(graph1=daisy_knn_graph,
-                      graph2=pagoda_knn_graph){
+join_graphs<-function(graph1,
+                      graph2){
   
   #extract edge lists
   edgelist_1<-cbind(data.frame(igraph::get.edgelist(graph1)),
@@ -183,7 +183,7 @@ plot_cluster_graph<-function(knn_graph,
   
   
   
-  plot(t_clusters,knn_graph,layout=l,vertex.label=NA)
+  plot(t_clusters,knn_graph,layout=l,...)
   
 }
 
