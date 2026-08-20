@@ -16,34 +16,40 @@
 #' 
 #' @return a list containing two data frames, igg and pheno
 #' @export
+#load and clean iggdata
 load_and_clean_DAISY_data<-function(dataloc,
-                                    phenoloc, 
-                                    removeoutliers=F, 
-                                    backgroundThesholdval=1,
-                                    log2=F){
+                              phenoloc,
+                              igg_cols,
+                              mols_to_remove,
+                              sub_id_col,
+                              removeoutliers=F, 
+                              backgroundThesholdval=1,
+                              log2=F){
   
   
   #load glycan data
   iggdata<-read.csv(dataloc)
   
   #remove GLYRDC_078
-  iggdata<-iggdata[,-which(colnames(iggdata)=="GLYRDC_078")]
+  iggdata<-iggdata[,-which(colnames(iggdata)==mols_to_remove)]
   
   #keep earliest sample
   iggdata<-keep_earliest_samples(iggdata)
-  rownames(iggdata)<-iggdata$Subject.ID
+  rownames(iggdata)<-iggdata[,sub_id_col]
   
   #keep only igg data
-  iggdata<-iggdata[,grep("GLY",colnames(iggdata))]
+  iggdata<-iggdata[,igg_cols]
   
   
   #load updated pheno data
-  phenodata<-xlsx::read.xlsx(phenoloc,1)[-c(1:5),]
-  rownames(phenodata)<-phenodata$Subject.ID
+  if (!is.null(phenoloc) && phenoloc != "") {
+    phenodata <- xlsx::read.xlsx(phenoloc, 1)[-c(1:5), ]
+    rownames(phenodata) <- phenodata[, sub_id_col]
+  }
   
   #remove outliers, 7734 outliers
   if (removeoutliers==T){
-    iggdata<-outliers_to_na(iggdata)
+  iggdata<-outliers_to_na(iggdata)
   }
   #remove glycans with more than 70 na's 
   #GLYPW_057, GLYPW_079, GLYPW_095, GLYPW_107, GLYRDC_022, GLYRDC_057,
@@ -54,8 +60,9 @@ load_and_clean_DAISY_data<-function(dataloc,
   #iggdata<-iggdata[,-which(colnames(iggdata)%in%gly_torm)]
   
   #correct all negative values to 0.1
+  if (!is.null(backgroundThesholdval) && backgroundThesholdval != "") {
   iggdata[iggdata<backgroundThesholdval]<-backgroundThesholdval+0.1
-  
+  }
   
   # #merge with updated phenotype data
   newdatafile<-merge.data.frame(iggdata,phenodata,by="row.names")
@@ -77,7 +84,7 @@ load_and_clean_DAISY_data<-function(dataloc,
                             levels=c("Progressor",
                                      "Non-progressor",
                                      "Control"))
-  
+
   daisy
 }
 
@@ -131,33 +138,33 @@ load_and_clean_PAGODA_data<-function(fileloc,
 #' @param fileloc Path to location of glycan class data file
 #' @return data frame for classification of glycans
 #' @export
-load_glycan_classes<-function(fileloc="/Users/paultran/Downloads/glycan_classes.csv"){
-  glycan_classes<-read.csv(fileloc,na.strings = "")
-  glycan_classes<-glycan_classes[-which(duplicated(glycan_classes$Glycan.ID)),]
-  glycan_classes<-glycan_classes[-which(is.na(glycan_classes$Glycan.ID)),]
-  rownames(glycan_classes)<-glycan_classes$Glycan.ID
-  glycan_classes
+#load glycan classes
+#leave a help page explaining users to create a separate file to create a table with 4 columns
+#"Glycan ID", "Glycan_name", "Class"
+load_glycan_classes <- function(fileloc) {
+  read.csv(fileloc, na.strings = "") %>%
+    # Remove rows where Glycan.ID is NA
+    filter(!is.na(Glycan.ID)) %>%
+    # Remove duplicate Glycan.IDs (keeps the first occurrence)
+    distinct(Glycan.ID, .keep_all = TRUE) %>%
+    # Set Glycan.ID as the row names
+    column_to_rownames(var = "Glycan.ID")
 }
 
 #' Keep earliest sample only for multiple samples
 #' 
-#' 
 #' @param iggdata data frame with repeat samples
 #' @return data frame  with only earliest samples
 #' @export
-keep_earliest_samples<-function(iggdata){
-  subjects<-as.character(unique(iggdata$Subject.ID))
-  iggdata$Date.of.Sample.Collection<-as.Date(iggdata$Date.of.Sample.Collection,format="%m/%d/%Y")
-  keep<-c()
-  
-  for (i in 1:length(subjects)){
-    samps<-which(iggdata$Subject.ID==subjects[i])
-    dd<-cbind.data.frame(dates=iggdata$Date.of.Sample.Collection[samps],samps)[order(iggdata$Date.of.Sample.Collection[samps]),]
-    index<-dd$samps[1]
-    keep<-c(keep,index)
-    rm(dd,i,index,samps)
-  }
-  
-  iggdata<-iggdata[keep,]
-  iggdata
+keep_earliest_samples <- function(iggdata, date_col_name, sub_id_col_name) {
+  iggdata %>%
+    # Dynamically convert the chosen date column
+    mutate(
+      {{ date_col_name }} := as.Date(.data[[date_col_name]], format = "%m/%d/%Y")
+    ) %>%
+    # Group by the dynamic subject ID column, sort by the dynamic date column, and take the first row
+    group_by(.data[[sub_id_col_name]]) %>%
+    arrange(.data[[date_col_name]], .by_group = TRUE) %>%
+    slice_head(n = 1) %>%
+    ungroup()
 }
