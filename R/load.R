@@ -10,6 +10,8 @@
 #' 
 #' @param dataloc Path to DAISY Iggdata
 #' @param phenoloc Path to DAISY phenotype data
+#' @param igg_cols a vector containing names of the molecules or glycans
+#' @param sub_id_col name of the column where subject ID can be located
 #' @param removeoutliers Logical indicating whether or not to remove outliers in the iggdata
 #' @param backgroundThesholdval Value for background thresholding of Iggdata
 #' @param log2 Logical indicating whether or not to log2 transform the iggdata
@@ -17,33 +19,38 @@
 #' @return a list containing two data frames, igg and pheno
 #' @export
 load_and_clean_DAISY_data<-function(dataloc,
-                                    phenoloc, 
-                                    removeoutliers=F, 
-                                    backgroundThesholdval=1,
-                                    log2=F){
+                              phenoloc,
+                              igg_cols,
+                              mols_to_remove,
+                              sub_id_col,
+                              removeoutliers=F, 
+                              backgroundThesholdval=1,
+                              log2=F){
   
   
   #load glycan data
   iggdata<-read.csv(dataloc)
   
   #remove GLYRDC_078
-  iggdata<-iggdata[,-which(colnames(iggdata)=="GLYRDC_078")]
+  iggdata<-iggdata[,-which(colnames(iggdata)==mols_to_remove)]
   
   #keep earliest sample
   iggdata<-keep_earliest_samples(iggdata)
-  rownames(iggdata)<-iggdata$Subject.ID
+  rownames(iggdata)<-iggdata[,sub_id_col]
   
   #keep only igg data
-  iggdata<-iggdata[,grep("GLY",colnames(iggdata))]
+  iggdata<-iggdata[,igg_cols]
   
   
   #load updated pheno data
-  phenodata<-xlsx::read.xlsx(phenoloc,1)[-c(1:5),]
-  rownames(phenodata)<-phenodata$Subject.ID
+  if (!is.null(phenoloc) && phenoloc != "") {
+    phenodata <- xlsx::read.xlsx(phenoloc, 1)[-c(1:5), ]
+    rownames(phenodata) <- phenodata[, sub_id_col]
+  }
   
   #remove outliers, 7734 outliers
   if (removeoutliers==T){
-    iggdata<-outliers_to_na(iggdata)
+  iggdata<-outliers_to_na(iggdata)
   }
   #remove glycans with more than 70 na's 
   #GLYPW_057, GLYPW_079, GLYPW_095, GLYPW_107, GLYRDC_022, GLYRDC_057,
@@ -54,8 +61,9 @@ load_and_clean_DAISY_data<-function(dataloc,
   #iggdata<-iggdata[,-which(colnames(iggdata)%in%gly_torm)]
   
   #correct all negative values to 0.1
+  if (!is.null(backgroundThesholdval) && backgroundThesholdval != "") {
   iggdata[iggdata<backgroundThesholdval]<-backgroundThesholdval+0.1
-  
+  }
   
   # #merge with updated phenotype data
   newdatafile<-merge.data.frame(iggdata,phenodata,by="row.names")
