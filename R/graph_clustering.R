@@ -92,10 +92,10 @@ join_graphs<-function(graph1=daisy_knn_graph,
 #' 
 #' @param knn_graph igraph object
 #' @param cluster_method graph cluster method. Default = "louvain"
-#' 
+#' @param vertex.label provide a vector of names of genes, proteins, glycans
 #' @return igraph cluster object
 #' @export
-cluster_graph<-function(knn_graph,cluster_method="louvain"){
+cluster_graph<-function(knn_graph,cluster_method="prop"){
   
   #fast optimal
   # t_optimal_clusters<-igraph::cluster_optimal(knn_graph)
@@ -121,19 +121,13 @@ cluster_graph<-function(knn_graph,cluster_method="louvain"){
   }
   #prop
   if (cluster_method=="prop"){
-    t_clusters<-igraph::cluster_label_prop(knn_graph)
+    t_clusters<-cluster_label_prop(knn_graph)
   }
   
   t_clusters
 }
 
-#' run umap algorithm on igg data
-#' 
-#' @param knn_graph igraph object
-#' @param cluster_method graph cluster method. Default = "louvain"
-#' 
-#' @return igraph cluster object
-#' @export
+
 plot_cluster_graph<-function(knn_graph,
                              myumap,
                              layout="umap",
@@ -183,7 +177,7 @@ plot_cluster_graph<-function(knn_graph,
   
   
   
-  plot(t_clusters,knn_graph,layout=l,vertex.label=NA)
+  plot(t_clusters,knn_graph,layout=l)
   
 }
 
