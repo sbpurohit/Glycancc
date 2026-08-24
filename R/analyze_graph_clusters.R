@@ -129,45 +129,103 @@ plot_significant_cluster_classes<-function(cluster_class_enrichment){
 #' This function performs linear regression for each column in a given data frame
 #' except for those listed as a dependent variable
 #' @param newdatafile data frame with all independent and dependent variables to be modeled
-#' @param groups a vector of all dependent variables. Example: groups<-c("Group", "Sex", "FDR", "HLA_risk","Draw_Age")
+#' @param covariates a vector of all dependent variables. Example: groups<-c("Group", "Sex", "FDR", "HLA_risk","Draw_Age")
+#' @param depVarList a vector of all y variables. Example: depVarList<-c("Cluster 1", "Cluster 2", "Cluster 3", ....) or c("CRP","SAA","sgp130","sIL6R" )
 #' 
 #' @return list object including abbreviated summary table of significant associations, summary table of all associations, and all models
 #' @export
-univariate_models<-function(newdatafile,groups){
+univariate_models <- function(newdatafile, 
+                              covariates, 
+                              depVarList,
+                              group_col = "Group") {
   
-  # newdatafile=daisy$combined
-  glys_torm<-suppressWarnings(names(which(is.na(apply(newdatafile,2,sd,na.rm=T)))))
-  # groups<-c("Group", 
-  #           "Sex", "FDR", 
-  #           "HLA_risk","Draw_Age")
-  depVarList = setdiff(colnames(newdatafile),groups)
-  depVarList<-setdiff(depVarList,intersect(depVarList,glys_torm))
+  # If you pass custom variables, it uses them. Otherwise, 
+  # it falls back to automatic detection using group_col:
+  if (missing(depVarList) || is.null(depVarList)) {
+    glys_torm <- suppressWarnings(names(which(is.na(apply(newdatafile, 2, sd, na.rm = TRUE)))))
+    depVarList <- setdiff(colnames(newdatafile), group_col)
+    depVarList <- setdiff(depVarList, intersect(depVarList, glys_torm))
+  }
   
-  #Apply over them and create model for each
-  allModels = lapply(depVarList, function(x){
-    #x="GLYPW_085"
+  # Apply over them and create model for each safely
+  allModels <- lapply(depVarList, function(x) {
     
-    # lme4::lmer(formula= paste0("`", x, "` ~ Group + Sex + FDR + HLA_risk + Draw_Age + (1| Study)"), 
-    #    data= newdatafile ,na.action = na.omit)
-    lm(formula= paste0("`", x, "` ~ Group + Sex + FDR + HLA_risk + Draw_Age"), 
-       data= newdatafile ,na.action = na.omit)
+    # Use dynamic group_col instead of hardcoded "Group"
+    form <- as.formula(paste0("`", x, "` ~ `", group_col, "` + ", paste(setdiff(covariates, group_col), collapse = " + ")))
     
+    # Check if target 'x' or covariates contain Inf/NaN for this specific iteration
+    vars_needed <- c(x, group_col, setdiff(covariates, group_col))
+    sub_df <- newdatafile[, vars_needed, drop = FALSE]
+    
+    # Keep only rows where values are strictly finite (drops NA, NaN, Inf)
+    valid_rows <- apply(sub_df, 1, function(row) {
+      all(is.finite(suppressWarnings(as.numeric(as.factor(row))))) || all(is.finite(suppressWarnings(as.numeric(row))))
+    })
+    
+    # Safely fit lm, returns NULL if an error occurs
+    tryCatch({
+      lm(formula = form, data = newdatafile, subset = valid_rows)
+    }, error = function(e) {
+      NULL 
+    })
   })
   
-  names(allModels)<-depVarList
+  # Name the list and filter out any NULLs if models failed completely
+  names(allModels) <- depVarList
+  allModels <- purrr::compact(allModels) 
   
-  univ_mod_sum<-lapply(allModels,broom::tidy)
+  univ_mod_sum <- lapply(allModels, broom::tidy)
   
-  estimates<-lapply(univ_mod_sum,'[[',2)
-  pvals<-lapply(univ_mod_sum,'[[',5)
+  estimates <- lapply(univ_mod_sum, '[[', 2)
+  pvals <- lapply(univ_mod_sum, '[[', 5)
   
-  univ_mod_sum_tab<-cbind.data.frame(nonprog_est=unlist(lapply(estimates, '[[', 2)),
-                                     nonprog_p=unlist(lapply(pvals, '[[', 2)),
-                                     prog_est=unlist(lapply(estimates, '[[',3)),
-                                     prog_p=unlist(lapply(pvals, '[[',3)))
-  list(small_table=univ_mod_sum_tab,fulltable=univ_mod_sum,models=allModels)
+  univ_mod_sum_tab <- cbind.data.frame(
+    nonprog_est = unlist(lapply(estimates, '[[', 2)),
+    nonprog_p   = unlist(lapply(pvals, '[[', 2)),
+    prog_est    = unlist(lapply(estimates, '[[', 3)),
+    prog_p      = unlist(lapply(pvals, '[[', 3))
+  )
+  
+  list(small_table = univ_mod_sum_tab, fulltable = univ_mod_sum, models = allModels)
 }
 
+#convert model stats to ggplot format
+convert_to_ggplotformat<-function(daisy_models=daisy_eigen_models$fulltable){
+  #https://bookdown.org/MathiasHarrer/Doing_Meta_Analysis_in_R/es-calc.html
+  fulltab<-data.frame("effect_size","lowerCI","upperCI","Cluster", "Variable")[-1,]
+  
+  for (j in 2:dim(daisy_models$Cluster1)[1]){
+    # rowid=3
+    # j=2
+    rowid=j
+    resultstab<-data.frame(row.names = c(
+      "effect_size",
+      "lowerCI",
+      "upperCI"))
+    for (i in 1:length(daisy_models)){
+      # i=11
+      
+      # Then, we use the weights to calculate the pooled effect
+      pooled_effect <- daisy_models[[i]][rowid,2]
+      lowerCI<-pooled_effect-1.96*daisy_models[[i]][rowid,3]
+      upperCI<-pooled_effect+1.96*daisy_models[[i]][rowid,3]
+      resultstab<-cbind.data.frame(resultstab,unlist(c(pooled_effect,
+                                                       lowerCI,
+                                                       upperCI)))
+      
+    }
+    
+    colnames(resultstab)<-paste0("Cluster",1:length(daisy_models))
+    resultstab<-data.frame(t(resultstab))
+    resultstab$Cluster<-rownames(resultstab)
+    resultstab$Variable<-daisy_models$Cluster1$term[rowid]
+    fulltab<-rbind.data.frame(fulltab,resultstab)
+    
+  }
+  fulltab$Cluster<-factor(fulltab$Cluster,levels=paste0("Cluster",length(daisy_models):1))
+  
+  fulltab
+}
 #' convert model stats to ggplot format
 #' 
 #' This function converts the output from ??univariate_models to ggplot2 format
