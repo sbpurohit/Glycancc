@@ -129,43 +129,61 @@ plot_significant_cluster_classes<-function(cluster_class_enrichment){
 #' This function performs linear regression for each column in a given data frame
 #' except for those listed as a dependent variable
 #' @param newdatafile data frame with all independent and dependent variables to be modeled
-#' @param groups a vector of all dependent variables. Example: groups<-c("Group", "Sex", "FDR", "HLA_risk","Draw_Age")
-#' 
+#' @param groups a vector of all dependent variables. Example: groups=c("Group", "Sex", "FDR", "HLA_risk","Draw_Age")
+#' @param depVarList a vector of all clusters. Example: depVarList=c("Cluster1", "Cluster2", "Cluster3", "Cluster4")
 #' @return list object including abbreviated summary table of significant associations, summary table of all associations, and all models
 #' @export
-univariate_models<-function(newdatafile,groups){
+univariate_models <- function(newdatafile, 
+                              groups, 
+                              depVarList) {
   
-  # newdatafile=daisy$combined
-  glys_torm<-suppressWarnings(names(which(is.na(apply(newdatafile,2,sd,na.rm=T)))))
-  # groups<-c("Group", 
-  #           "Sex", "FDR", 
-  #           "HLA_risk","Draw_Age")
-  depVarList = setdiff(colnames(newdatafile),groups)
-  depVarList<-setdiff(depVarList,intersect(depVarList,glys_torm))
+  # If you pass custom variables, it uses them. Otherwise, 
+  # it falls back to your original automatic detection:
+  if (missing(depVarList) || is.null(depVarList)) {
+    glys_torm <- suppressWarnings(names(which(is.na(apply(newdatafile, 2, sd, na.rm = TRUE)))))
+    depVarList <- setdiff(colnames(newdatafile), groups)
+    depVarList <- setdiff(depVarList, intersect(depVarList, glys_torm))
+  }
   
-  #Apply over them and create model for each
-  allModels = lapply(depVarList, function(x){
-    #x="GLYPW_085"
+  # Apply over them and create model for each safely
+  allModels <- lapply(depVarList, function(x) {
     
-    # lme4::lmer(formula= paste0("`", x, "` ~ Group + Sex + FDR + HLA_risk + Draw_Age + (1| Study)"), 
-    #    data= newdatafile ,na.action = na.omit)
-    lm(formula= paste0("`", x, "` ~ Group + Sex + FDR + HLA_risk + Draw_Age"), 
-       data= newdatafile ,na.action = na.omit)
+    form <- as.formula(paste0("`", x, "` ~ Group + ", paste(setdiff(groups, "Group"), collapse = " + ")))
     
+    # Check if target 'x' or covariates contain Inf/NaN for this specific iteration
+    vars_needed <- c(x, "Group", setdiff(groups, "Group"))
+    sub_df <- newdatafile[, vars_needed, drop = FALSE]
+    
+    # Keep only rows where values are strictly finite (drops NA, NaN, Inf)
+    valid_rows <- apply(sub_df, 1, function(row) {
+      all(is.finite(suppressWarnings(as.numeric(as.factor(row))))) || all(is.finite(suppressWarnings(as.numeric(row))))
+    })
+    
+    # Safely fit lm, returns NULL if an error occurs
+    tryCatch({
+      lm(formula = form, data = newdatafile, subset = valid_rows)
+    }, error = function(e) {
+      NULL 
+    })
   })
   
-  names(allModels)<-depVarList
+  # Name the list and filter out any NULLs if models failed completely
+  names(allModels) <- depVarList
+  allModels <- purrr::compact(allModels) # updated with explicit namespace for safety
   
-  univ_mod_sum<-lapply(allModels,broom::tidy)
+  univ_mod_sum <- lapply(allModels, broom::tidy)
   
-  estimates<-lapply(univ_mod_sum,'[[',2)
-  pvals<-lapply(univ_mod_sum,'[[',5)
+  estimates <- lapply(univ_mod_sum, '[[', 2)
+  pvals <- lapply(univ_mod_sum, '[[', 5)
   
-  univ_mod_sum_tab<-cbind.data.frame(nonprog_est=unlist(lapply(estimates, '[[', 2)),
-                                     nonprog_p=unlist(lapply(pvals, '[[', 2)),
-                                     prog_est=unlist(lapply(estimates, '[[',3)),
-                                     prog_p=unlist(lapply(pvals, '[[',3)))
-  list(small_table=univ_mod_sum_tab,fulltable=univ_mod_sum,models=allModels)
+  univ_mod_sum_tab <- cbind.data.frame(
+    nonprog_est = unlist(lapply(estimates, '[[', 2)),
+    nonprog_p   = unlist(lapply(pvals, '[[', 2)),
+    prog_est    = unlist(lapply(estimates, '[[', 3)),
+    prog_p      = unlist(lapply(pvals, '[[', 3))
+  )
+  
+  list(small_table = univ_mod_sum_tab, fulltable = univ_mod_sum, models = allModels)
 }
 
 #' convert model stats to ggplot format
