@@ -53,47 +53,59 @@ make_correlation_network<-function(iggdata,
 #' each glycan class in each glycan cluster using fisher's exact test
 #' 
 #' @param co_cluster data frame of iggdata
+#' @param class_col provide name of the column where the class for the genes, proteins or glycans is provided for glygroups dataframe
+#' @param id_col provide name of the column which contains names of the proteins, genes or glycans
 #' @param glygroups p-value cutoff for edge removal from graph. Default = 0.05
 #' 
 #' @return list including a full table and partial table of significantly enriched classes
 #' @export
-glycan_class_enrichment<-function(co_cluster=co_cluster,
-                                  glygroups=glycan_classes){
+glycan_class_enrichment <- function(co_cluster, 
+                                    glygroups = glycan_classes, 
+                                    class_col, 
+                                    id_col ) {
   
-  results2<-data.frame("index"=1:length(unique(glycan_classes$Glycan.Class)))
-  for (j in 1:max(co_cluster)){
-    # j=1
-    gly_clust<-names(which(co_cluster==j))
-    group_dummyvars<-fastDummies::dummy_cols(glygroups$Glycan.Class)
+  # Dynamically extract columns using .data[[...]]
+  classes_vec <- glygroups[[class_col]]
+  ids_vec <- glygroups[[id_col]]
+  
+  unique_classes <- unique(classes_vec)
+  results2 <- data.frame("index" = 1:length(unique_classes))
+  
+  for (j in 1:max(co_cluster)) {
+    gly_clust <- names(which(co_cluster == j))
+    group_dummyvars <- fastDummies::dummy_cols(classes_vec)
     
-    gly_clust_vec<-rep(0,dim(glygroups)[1])
-    gly_clust_vec[which(glygroups$Glycan.ID%in%gly_clust)]=1
-    results<-data.frame("Class","p-val")[-1,]
-    for (i in 2:dim(group_dummyvars)[2]){
-      # i=2
-      tab<-table(gly_clust_vec,group_dummyvars[,i])
-      myvec<-c(paste(colnames(group_dummyvars)[i]),
-               fisher.test(tab,alternative="greater")$p.val)
-      results<-rbind.data.frame(results,myvec)
+    gly_clust_vec <- rep(0, nrow(glygroups))
+    gly_clust_vec[which(ids_vec %in% gly_clust)] <- 1
+    
+    results <- data.frame("Class", "p-val")[-1, ]
+    
+    for (i in 2:ncol(group_dummyvars)) {
+      tab <- table(gly_clust_vec, group_dummyvars[, i])
+      myvec <- c(paste(colnames(group_dummyvars)[i]),
+                 fisher.test(tab, alternative = "greater")$p.val)
+      results <- rbind.data.frame(results, myvec)
     }
     
-    results2<-cbind.data.frame(results2,results)
+    results2 <- cbind.data.frame(results2, results)
   }
-  results2<-results2[,c(2,seq(3,dim(results2)[2],2))]
-  colnames(results2)<-c("Glycan.Class",paste0("Cluster",1:max(co_cluster)))
-  glyclass<-results2$Glycan.Class
-  glyclass<-unlist(lapply(strsplit(glyclass,"_"),'[[',2))
   
-  results2<-results2[,-1]
-  results2<-apply(results2,2,function(x)as.numeric(as.vector(x)))
+  results2 <- results2[, c(2, seq(3, ncol(results2), 2))]
+  colnames(results2) <- c("Glycan.Class", paste0("Cluster", 1:max(co_cluster)))
   
-  rows_to_keep<-which(apply(results2,1,function(x)min(x)<0.05))
-  table3<-results2[rows_to_keep,]
+  glyclass <- results2$Glycan.Class
+  glyclass <- unlist(lapply(strsplit(glyclass, "_"), '[[', 2))
   
-  rownames(results2)<-glyclass
-  rownames(table3)<-glyclass[rows_to_keep]
+  results2 <- results2[, -1, drop = FALSE]
+  results2 <- apply(results2, 2, function(x) as.numeric(as.vector(x)))
   
-  list("fulltab"=results2,"smalltab"=table3)  
+  rows_to_keep <- which(apply(results2, 1, function(x) min(x) < 0.05))
+  table3 <- results2[rows_to_keep, , drop = FALSE]
+  
+  rownames(results2) <- glyclass
+  rownames(table3) <- glyclass[rows_to_keep]
+  
+  list("fulltab" = results2, "smalltab" = table3)  
 }
 
 #' plot result of glycan enrichment analysis as bubble chart on ggplot2
@@ -101,28 +113,54 @@ glycan_class_enrichment<-function(co_cluster=co_cluster,
 #' This function plots the results from ??glycan_class_enrichment as a bubble chart
 #' 
 #' @param cluster_class_enrichment output from ??glycan_class_enrichment
+#' @param only_significant = TRUE to print only significant FALSE will print all the data default is TRUE
+#' @param x_label to print custom x-axis label, default is x_label = "Cluster"
+#' @param y_label = "Glycan Class" to print custom y-axis label, default is y_label = "Glycan Class"
 #' 
 #' @return bubble chart
 #' @export
-plot_significant_cluster_classes<-function(cluster_class_enrichment){
-  
-  sig_class_cluster<-cbind.data.frame("Glycan_Class"=rownames(cluster_class_enrichment$smalltab),
-                                      tidyr::gather(data.frame(cluster_class_enrichment$smalltab),
-                                                    "cluster","p.val",colnames(cluster_class_enrichment$smalltab)))
-  sig_class_cluster$p.val<- -log10(sig_class_cluster$p.val)
-  sig_class_cluster$cluster<- factor(sig_class_cluster$cluster,
-                                     levels = paste0("Cluster",1:dim(cluster_class_enrichment$smalltab)[2]))
-  sig_class_cluster$Glycan_Class<- factor(sig_class_cluster$Glycan_Class,
-                                          levels = sort(unique(sig_class_cluster$Glycan_Class),decreasing = T))
-  
-  g<-ggplot(data=sig_class_cluster,
-            aes(y=Glycan_Class,x=cluster,size=p.val,color=p.val))+
-    geom_point()+ 
-    theme_minimal()+
-    theme(axis.text.x = element_text(angle = 90))
-  g
-}
 
+library(ggplot2)
+library(tidyr)
+
+plot_significant_cluster_classes <- function(cluster_class_enrichment, 
+                                             only_significant = TRUE, 
+                                             x_label = "Cluster", 
+                                             y_label = "Glycan Class") {
+  
+  tab_to_use <- if (only_significant) {
+    cluster_class_enrichment$smalltab
+  } else {
+    cluster_class_enrichment$fulltab
+  }
+  
+  df_to_gather <- as.data.frame(tab_to_use)
+  
+  sig_class_cluster <- cbind.data.frame(
+    "Glycan_Class" = rownames(df_to_gather),
+    tidyr::gather(df_to_gather, "cluster", "p.val", colnames(df_to_gather))
+  )
+  
+  sig_class_cluster$p.val <- -log10(sig_class_cluster$p.val)
+  
+  sig_class_cluster$cluster <- factor(
+    sig_class_cluster$cluster,
+    levels = paste0("Cluster", 1:ncol(tab_to_use))
+  )
+  
+  sig_class_cluster$Glycan_Class <- factor(
+    sig_class_cluster$Glycan_Class,
+    levels = sort(unique(sig_class_cluster$Glycan_Class), decreasing = TRUE)
+  )
+  
+  g <- ggplot(data = sig_class_cluster, aes(y = Glycan_Class, x = cluster, size = p.val, color = p.val)) +
+    geom_point() + 
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    labs(x = x_label, y = y_label)
+  
+  return(g)
+}
 
 #' regression models
 #' 
